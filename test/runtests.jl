@@ -18,9 +18,10 @@ hello1 = readmgr("hello")
 @test status(hello1) == :done
 cleanup(hello1)
 
+const msg = "Hello, World!"
 hello = @persist "hello" ProcessManager 1 begin
     sleep(1)
-    println("Hello, World!")
+    println(msg)
 end
 @test status(hello) == :running
 cancel(hello)
