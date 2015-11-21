@@ -4,8 +4,8 @@ using Base.Test
 try rm("hello.job", recursive=true) end
 
 hello = persist("hello", ProcessManager, 1) do
-  sleep(1)
-  println("Hello, World!")
+    sleep(1)
+    println("Hello, World!")
 end
 @test status(hello) == :running
 @unix_only @test ismatch(r"sh hello", jobinfo(hello))
@@ -19,8 +19,8 @@ hello1 = readmgr("hello")
 cleanup(hello1)
 
 hello = persist("hello", ProcessManager, 1) do
-  sleep(1)
-  println("Hello, World!")
+    sleep(1)
+    println("Hello, World!")
 end
 @test status(hello) == :running
 cancel(hello)
