@@ -1,6 +1,8 @@
 using Persist
 using Base.Test
 
+const isunix = @unix ? true : false
+
 try rm("hello.job", recursive=true) end
 
 hello = persist("hello", ProcessManager, 1) do
@@ -8,7 +10,9 @@ hello = persist("hello", ProcessManager, 1) do
   println("Hello, World!")
 end
 @test status(hello) == :running
-@test ismatch(r"sh hello", jobinfo(hello))
+if isunix
+  @test ismatch(r"sh hello", jobinfo(hello))
+end
 waitjob(hello)
 @test status(hello) == :done
 @test getstdout(hello) == "Hello, World!\n"
@@ -28,4 +32,6 @@ waitjob(hello)
 @test status(hello) == :done
 cleanup(hello)
 # TODO: Use glob instead of shell
-@test readall(`sh -c 'echo hello*'`) == "hello*\n"
+if isunix
+  @test readall(`sh -c 'echo hello*'`) == "hello*\n"
+end
