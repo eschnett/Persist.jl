@@ -152,6 +152,7 @@ julia -p $nprocs -e 'using Persist; Persist.runjob($(quotestring(jobfile)))' </d
   open(joinpath(jobdir, mgrfile), "w") do f
     serialize(f, mgr)
   end
+  nothing
 end
 
 """status(mgr::JobManager) returns either :empty, :queued, :running, or :done"""
@@ -194,6 +195,7 @@ function cancel(mgr::ProcessManager; force::Bool=false)
   # TODO: The job may still be running, and we will never know.
   donefile = joinpath(jobdirname(mgr.jobname), donefilename(mgr.jobname))
   open(donefile, "w") do f end
+  nothing
 end
 
 function waitjob(mgr::ProcessManager)
@@ -201,6 +203,7 @@ function waitjob(mgr::ProcessManager)
   while status(mgr) == :running
     sleep(1)
   end
+  nothing
 end
 
 function getstdout(mgr::ProcessManager)
@@ -217,6 +220,7 @@ function cleanup(mgr::ProcessManager)
   @assert status(mgr) == :done
   try rm(jobdirname(mgr.jobname), recursive=true) end
   mgr.pid = -1
+  nothing
 end
 
 
