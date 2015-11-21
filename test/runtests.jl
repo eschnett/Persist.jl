@@ -18,7 +18,7 @@ hello1 = readmgr("hello")
 @test status(hello1) == :done
 cleanup(hello1)
 
-hello = persist("hello", ProcessManager, 1) do
+hello = @persist "hello" ProcessManager 1 begin
     sleep(1)
     println("Hello, World!")
 end

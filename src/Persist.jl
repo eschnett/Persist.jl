@@ -6,9 +6,9 @@ module Persist
 import Base: serialize, deserialize
 export serialize, deserialize
 
-export JobManager, ProcessManager
+export JobManager, ProcessManager, readmgr
 export status, jobinfo, cancel, waitjob, getstdout, getstderr, cleanup
-export persist, readmgr
+export persist, @persist
 
 
 
@@ -59,6 +59,17 @@ end
 
 
 abstract JobManager
+
+function readmgr(jobname::AbstractString)
+    mgrfile = joinpath(jobdirname(jobname), mgrfilename(jobname))
+    local mgr
+    open(mgrfile, "r") do f
+        mgr = deserialize(f)
+    end
+    mgr::JobManager
+end
+
+
 
 function runjob(jobfile::AbstractString)
     local job
@@ -232,13 +243,9 @@ function persist{JM<:JobManager}(job, jobname::AbstractString, ::Type{JM},
     mgr::JM
 end
 
-function readmgr(jobname::AbstractString)
-    mgrfile = joinpath(jobdirname(jobname), mgrfilename(jobname))
-    local mgr
-    open(mgrfile, "r") do f
-        mgr = deserialize(f)
-    end
-    mgr::JobManager
+macro persist(jobname, mgrtype, nprocs, expr)
+    expr = Base.localize_vars(:(()->$expr), false)
+    :(persist($(esc(expr)), $(esc(jobname)), $(esc(mgrtype)), $(esc(nprocs))))
 end
 
 end # module
