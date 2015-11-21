@@ -1,7 +1,7 @@
 module Persist
 
 # TODO: use JLD for repeatability
-using JLD
+# using JLD
 
 import Base: serialize, deserialize
 export serialize, deserialize
