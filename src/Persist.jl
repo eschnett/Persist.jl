@@ -229,7 +229,24 @@ end
 
 function cleanup(mgr::ProcessManager)
     @assert status(mgr) == :done
-    try rm(jobdirname(mgr.jobname), recursive=true) end
+    try
+        rm(jobdirname(mgr.jobname), recursive=true)
+    catch
+        # We cannot remove the job directory. This can happen for
+        # several benign reasons, e.g. on NFS file systems, or if the
+        # subprocess has not yet been cleaned up. We create a
+        # directory "Trash" and move the job directory there.
+        # Create trash directory
+        trashdir = "Trash"
+        try mkdir(trashdir) end
+        # Move job directory to trash directory
+        uuid = Base.Random.uuid4()
+        newname = "$(jobdirname(mgr.jobname))-$uuid"
+        mv(jobdirname(mgr.jobname), joinpath(trashdir, newname))
+        # Try to delete trash directory, including everything that was
+        # previously move there
+        try rm(trashdir, recursive=true) end
+    end
     mgr.pid = -1
     nothing
 end
