@@ -35,6 +35,43 @@ function quotestring(str::AbstractString)
     str
 end
 
+function quotestring{S<:AbstractString}(strs::Vector{S})
+    join(map(quotestring, strs), " ")
+end
+
+function rmtree(path::AbstractString)
+    try
+        rm(path, recursive=true)
+    catch
+        # We cannot remove the file or directory. This can happen for
+        # several benign reasons, e.g. on NFS file systems, or if a
+        # process is using it as its current directory.
+        @unix ? begin
+            # On Unix: As a work-around, create a directory "Trash"
+            # and move the job directory there.
+            # Create trash directory
+            trashdir = "Trash"
+            try mkdir(trashdir) end
+            # Move file or directory to trash directory
+            uuid = Base.Random.uuid4()
+            _, file = splitdir(path)
+            newname = "$file-$uuid"
+            mv(path, joinpath(trashdir, newname))
+            # Try to delete trash directory, including everything that
+            # was previously moved there
+            try rm(trashdir, recursive=true) end
+        end : begin
+            # On Windows: As a work-around, rename the file or
+            # directory
+            uuid = Base.Random.uuid4()
+            newpath = "$path-Trash-$uuid"
+            mv(path, newpath)
+        end
+    end
+end
+    
+
+
 function jobdirname(jobname::AbstractString)
     "$(sanitize(jobname)).job"
 end
@@ -132,7 +169,7 @@ function submit(job, mgr::ProcessManager, nprocs::Integer)
 #! /bin/sh
 # This is an auto-generated Julia script for the Persist package
 echo \$\$ >$pidfile
-julia -p $nprocs -e 'using Persist; Persist.runjob($(quotestring(jobfile)))' </dev/null >$outfile 2>$errfile
+$(quotestring(Base.julia_cmd().exec)) -p $nprocs -e 'using Persist; Persist.runjob($(quotestring(jobfile)))' </dev/null >$outfile 2>$errfile
 : >$donefile
 """)
     end
@@ -222,35 +259,8 @@ function getstderr(mgr::ProcessManager)
 end
 
 function cleanup(mgr::ProcessManager)
-    info("cleanup.0")
     @assert status(mgr) == :done
-    info("cleanup.1")
-    try
-        info("cleanup.2")
-        rm(jobdirname(mgr.jobname), recursive=true)
-        info("cleanup.3")
-    catch
-        info("cleanup.4")
-        # We cannot remove the job directory. This can happen for
-        # several benign reasons, e.g. on NFS file systems, or if the
-        # subprocess has not yet been cleaned up. We create a
-        # directory "Trash" and move the job directory there.
-        # Create trash directory
-        trashdir = "Trash"
-        try mkdir(trashdir) end
-        info("cleanup.5")
-        # Move job directory to trash directory
-        uuid = Base.Random.uuid4()
-        newname = "$(jobdirname(mgr.jobname))-$uuid"
-        info("cleanup.6")
-        mv(jobdirname(mgr.jobname), joinpath(trashdir, newname))
-        info("cleanup.7")
-        # Try to delete trash directory, including everything that was
-        # previously move there
-        try rm(trashdir, recursive=true) end
-        info("cleanup.8")
-    end
-    info("cleanup.9")
+    rmtree(jobdirname(mgr.jobname))
     mgr.pid = -1
     nothing
 end
@@ -298,12 +308,6 @@ function submit(job, mgr::SlurmManager, nprocs::Integer)
         serialize(f, job)
     end
     # Create a wrapper script
-    local exe
-    try
-        exe = abspath(joinpath(JULIA_HOME, "julia"))
-    catch
-        exe = "julia"
-    end
     outfile = outfilename(mgr.jobname)
     errfile = errfilename(mgr.jobname)
     shellfile = shellfilename(mgr.jobname)
@@ -312,7 +316,7 @@ function submit(job, mgr::SlurmManager, nprocs::Integer)
 #! /bin/sh
 # This is an auto-generated Julia script for the Persist package
 hostname
-$exe -p $nprocs -e 'using Persist; Persist.runjob($(quotestring(jobfile)))' </dev/null >$outfile 2>$errfile
+$(quotestring(Base.julia_cmd().exec)) -p $nprocs -e 'using Persist; Persist.runjob($(quotestring(jobfile)))' </dev/null >$outfile 2>$errfile
 """)
     end
     # Pre-create output files
@@ -392,24 +396,7 @@ end
 
 function cleanup(mgr::SlurmManager)
     @assert status(mgr) == :done
-    try
-        rm(jobdirname(mgr.jobname), recursive=true)
-    catch
-        # We cannot remove the job directory. This can happen for
-        # several benign reasons, e.g. on NFS file systems, or if the
-        # subprocess has not yet been cleaned up. We create a
-        # directory "Trash" and move the job directory there.
-        # Create trash directory
-        trashdir = "Trash"
-        try mkdir(trashdir) end
-        # Move job directory to trash directory
-        uuid = Base.Random.uuid4()
-        newname = "$(jobdirname(mgr.jobname))-$uuid"
-        mv(jobdirname(mgr.jobname), joinpath(trashdir, newname))
-        # Try to delete trash directory, including everything that was
-        # previously move there
-        try rm(trashdir, recursive=true) end
-    end
+    rmtree(jobdirname(mgr.jobname))
     mgr.jobid = ""
     nothing
 end
