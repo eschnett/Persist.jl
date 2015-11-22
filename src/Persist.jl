@@ -50,7 +50,7 @@ function rmtree(path::AbstractString)
         # We cannot remove the file or directory. This can happen for
         # several benign reasons, e.g. on NFS file systems, or if a
         # process is using it as its current directory.
-        @unix ? begin
+        @unix_only begin
             # On Unix: As a work-around, create a directory "Trash"
             info("rmtree.4")
             # and move the job directory there.
@@ -60,7 +60,7 @@ function rmtree(path::AbstractString)
             # Move file or directory to trash directory
             info("rmtree.5")
             uuid = Base.Random.uuid4()
-            _, file = splitdir(path)
+            file = basename(path)
             newname = "$file-$uuid"
             info("rmtree.6")
             mv(path, joinpath(trashdir, newname))
@@ -69,15 +69,6 @@ function rmtree(path::AbstractString)
             # was previously moved there
             try rm(trashdir, recursive=true) end
             info("rmtree.8")
-        end : begin
-            info("rmtree.9")
-            # On Windows: As a work-around, rename the file or
-            # directory
-            uuid = Base.Random.uuid4()
-            newpath = "$path-Trash-$uuid"
-            info("rmtree.10")
-            mv(path, newpath)
-            info("rmtree.11")
         end
         info("rmtree.12")
     end

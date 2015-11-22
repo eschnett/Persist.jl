@@ -3,6 +3,9 @@ using Base.Test
 
 # Clean up possible left-over output from previous (failed) tests
 try rm("hello.job", recursive=true) end
+try rm("hello2.job", recursive=true) end
+try rm("hello3.job", recursive=true) end
+try rm("Trash", recursive=true) end
 
 hello = persist("hello", ProcessManager, 1) do
     sleep(1)
@@ -20,7 +23,7 @@ hello1 = readmgr("hello")
 cleanup(hello1)
 
 const msg = "Hello, World!"
-hello = @persist "hello" ProcessManager 1 begin
+hello = @persist "hello2" ProcessManager 1 begin
     sleep(1)
     println(msg)
 end
@@ -40,7 +43,7 @@ try
 end
 
 if have_slurm
-    hello = persist("hello", SlurmManager, 1) do
+    hello = persist("hello3", SlurmManager, 1) do
         sleep(1)
         println("Hello, World!")
     end
