@@ -40,39 +40,27 @@ function quotestring{S<:AbstractString}(strs::Vector{S})
 end
 
 function rmtree(path::AbstractString)
-    info("rmtree.0")
     try
-        info("rmtree.1")
         rm(path, recursive=true)
-        info("rmtree.2")
-    catch
-        info("rmtree.3")
+    catch e
         # We cannot remove the file or directory. This can happen for
         # several benign reasons, e.g. on NFS file systems, or if a
         # process is using it as its current directory.
-        @unix_only begin
-            # On Unix: As a work-around, create a directory "Trash"
-            info("rmtree.4")
-            # and move the job directory there.
-            # Create trash directory
-            trashdir = "Trash"
-            try mkdir(trashdir) end
-            # Move file or directory to trash directory
-            info("rmtree.5")
-            uuid = Base.Random.uuid4()
-            file = basename(path)
-            newname = "$file-$uuid"
-            info("rmtree.6")
-            mv(path, joinpath(trashdir, newname))
-            info("rmtree.7")
-            # Try to delete trash directory, including everything that
-            # was previously moved there
-            try rm(trashdir, recursive=true) end
-            info("rmtree.8")
-        end
-        info("rmtree.12")
+        # As a work-around, create a directory "Trash" and move the
+        # job directory there.
+        # Note: This does not work on Windows.
+        # Create trash directory
+        trashdir = "Trash"
+        try mkdir(trashdir) end
+        # Move file or directory to trash directory
+        uuid = Base.Random.uuid4()
+        file = basename(path)
+        newname = "$file-$uuid"
+        mv(path, joinpath(trashdir, newname))
+        # Try to delete trash directory, including everything that was
+        # previously moved there
+        try rm(trashdir, recursive=true) end
     end
-    info("rmtree.13")
     nothing
 end
     
