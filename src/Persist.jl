@@ -42,7 +42,7 @@ end
 function rmtree(path::AbstractString)
     try
         rm(path, recursive=true)
-    catch e
+    catch
         # We cannot remove the file or directory. This can happen for
         # several benign reasons, e.g. on NFS file systems, or if a
         # process is using it as its current directory.
@@ -56,7 +56,13 @@ function rmtree(path::AbstractString)
         uuid = Base.Random.uuid4()
         file = basename(path)
         newname = "$file-$uuid"
-        mv(path, joinpath(trashdir, newname))
+        try
+            mv(path, joinpath(trashdir, newname))
+        catch e
+            # Ignore the error on Windows, since there doesn't seem to
+            # be a work-around
+            @unix_only rethrow(e)
+        end
         # Try to delete trash directory, including everything that was
         # previously moved there
         try rm(trashdir, recursive=true) end
