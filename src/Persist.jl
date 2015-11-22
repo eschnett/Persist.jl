@@ -1,14 +1,17 @@
 module Persist
 
+# TODO: use ClusterManagers
+# using ClusterManagers
+
 # TODO: use JLD for repeatability
 # using JLD
 
 import Base: serialize, deserialize
 export serialize, deserialize
 
-export JobManager, ProcessManager, readmgr
+export JobManager, ProcessManager, SlurmManager
 export status, jobinfo, cancel, waitjob, getstdout, getstderr, cleanup
-export persist, @persist
+export persist, @persist, readmgr
 
 
 
@@ -60,15 +63,6 @@ end
 
 abstract JobManager
 
-function readmgr(jobname::AbstractString)
-    mgrfile = joinpath(jobdirname(jobname), mgrfilename(jobname))
-    local mgr
-    open(mgrfile, "r") do f
-        mgr = deserialize(f)
-    end
-    mgr::JobManager
-end
-
 
 
 function runjob(jobfile::AbstractString)
@@ -100,7 +94,6 @@ end
 
 function deserialize(s::Base.SerializationState, ::Type{ProcessManager})
     mgr = ProcessManager(s)
-    # TODO: report deserialize(s, AbstractString)
     mgr.jobname = deserialize(s)
     mgr.pid = deserialize(s)
     mgr
@@ -158,6 +151,7 @@ julia -p $nprocs -e 'using Persist; Persist.runjob($(quotestring(jobfile)))' </d
         sleep(0.1)
     end
     mgr.pid = parse(Int, buf)
+    info("Process id: $(mgr.pid)")
     # Serialize the manager
     mgrfile = mgrfilename(mgr.jobname)
     open(joinpath(jobdir, mgrfile), "w") do f
@@ -253,6 +247,165 @@ end
 
 
 
+type SlurmManager <: JobManager
+    jobname::AbstractString
+    jobid::AbstractString
+
+    function SlurmManager(jobname::AbstractString)
+        new(jobname, "")
+    end
+
+    SlurmManager(::Base.SerializationState) = new()
+end
+
+function serialize(s::Base.SerializationState, mgr::SlurmManager)
+    Base.Serializer.serialize_type(s, SlurmManager)
+    serialize(s, mgr.jobname)
+    serialize(s, mgr.jobid)
+end
+
+function deserialize(s::Base.SerializationState, ::Type{SlurmManager})
+    mgr = SlurmManager(s)
+    mgr.jobname = deserialize(s)
+    mgr.jobid = deserialize(s)
+    mgr
+end
+
+function submit(job, mgr::SlurmManager, nprocs::Integer)
+    @assert status(mgr) == :empty
+    # Create job directory
+    jobdir = jobdirname(mgr.jobname)
+    jobdir = abspath(jobdir)
+    try
+        mkdir(jobdir)
+    catch
+        # There is another job with the same name
+        error("Job directory \"$jobdir\"exists already")
+    end
+    # Serialize the Julia function
+    jobfile = jobfilename(mgr.jobname)
+    open(joinpath(jobdir, jobfile), "w") do f
+        serialize(f, job)
+    end
+    # Create a wrapper script
+    local exe
+    try
+        exe = abspath(joinpath(JULIA_HOME, "julia"))
+    catch
+        exe = "julia"
+    end
+    outfile = outfilename(mgr.jobname)
+    errfile = errfilename(mgr.jobname)
+    shellfile = shellfilename(mgr.jobname)
+    open(joinpath(jobdir, shellfile), "w") do f
+        print(f, """
+#! /bin/sh
+# This is an auto-generated Julia script for the Persist package
+hostname
+$exe -p $nprocs -e 'using Persist; Persist.runjob($(quotestring(jobfile)))' </dev/null >$outfile 2>$errfile
+""")
+    end
+    # Pre-create output files
+    open(joinpath(jobdir, outfile), "w") do f end
+    open(joinpath(jobdir, errfile), "w") do f end
+    # Start the job in the job directory
+    # TODO: Teach Julia how to use the nodes that Slurm reserved
+    buf = readall(setenv(`sbatch -D $jobdir -J $(mgr.jobname) -n $nprocs $shellfile`,
+                         dir=jobdir))
+    m = match(r"Submitted batch job ([0-9]+)", buf)
+    mgr.jobid = m.captures[1]
+    info("Slurm job id: $(mgr.jobid)")
+    # Serialize the manager
+    mgrfile = mgrfilename(mgr.jobname)
+    open(joinpath(jobdir, mgrfile), "w") do f
+        serialize(f, mgr)
+    end
+    nothing
+end
+
+"""status(mgr::JobManager) returns either :empty, :queued, :running, or :done"""
+function status(mgr::SlurmManager)
+    if isempty(mgr.jobid) return :empty end
+    try
+        buf = readall(`squeue -h -j $(mgr.jobid) -o '%t'`)
+        state = chomp(buf)
+        if state in ["CF", "PD"]
+            return :queued
+        elseif state in ["CG", "R", "S"]
+            return :running
+        elseif state in ["CA", "CD", "F", "NF", "PR", "TO"]
+            return :done
+        else
+            @assert false
+        end
+    end
+    # Slurm knows nothing about this job
+    :done
+end
+
+function jobinfo(mgr::SlurmManager)
+    st = status(mgr)
+    @assert st != :empty
+    try
+        return readall(`squeue -j $(mgr.jobid)`)
+    end
+    # Slurm knows nothing about this job
+    "[:done]"
+end
+
+function cancel(mgr::SlurmManager; force::Bool=false)
+    @assert status(mgr) != :empty
+    # TODO: Handle things differently for force=false and force=true
+    run(`scancel -j $(mgr.jobid)`)
+    nothing
+end
+
+function waitjob(mgr::SlurmManager)
+    @assert status(mgr) != :empty
+    while status(mgr) != :done
+        sleep(1)
+    end
+    nothing
+end
+
+function getstdout(mgr::SlurmManager)
+    @assert status(mgr) != :empty
+    # TODO: Read stdout while job is running
+    readall(joinpath(jobdirname(mgr.jobname), outfilename(mgr.jobname)))
+end
+
+function getstderr(mgr::SlurmManager)
+    @assert status(mgr) != :empty
+    # TODO: Read stdout while job is running
+    readall(joinpath(jobdirname(mgr.jobname), errfilename(mgr.jobname)))
+end
+
+function cleanup(mgr::SlurmManager)
+    @assert status(mgr) == :done
+    try
+        rm(jobdirname(mgr.jobname), recursive=true)
+    catch
+        # We cannot remove the job directory. This can happen for
+        # several benign reasons, e.g. on NFS file systems, or if the
+        # subprocess has not yet been cleaned up. We create a
+        # directory "Trash" and move the job directory there.
+        # Create trash directory
+        trashdir = "Trash"
+        try mkdir(trashdir) end
+        # Move job directory to trash directory
+        uuid = Base.Random.uuid4()
+        newname = "$(jobdirname(mgr.jobname))-$uuid"
+        mv(jobdirname(mgr.jobname), joinpath(trashdir, newname))
+        # Try to delete trash directory, including everything that was
+        # previously move there
+        try rm(trashdir, recursive=true) end
+    end
+    mgr.jobid = ""
+    nothing
+end
+
+
+
 function persist{JM<:JobManager}(job, jobname::AbstractString, ::Type{JM},
                                  nprocs::Integer)
     mgr = JM(jobname)
@@ -263,6 +416,15 @@ end
 macro persist(jobname, mgrtype, nprocs, expr)
     expr = Base.localize_vars(:(()->$expr), false)
     :(persist($(esc(expr)), $(esc(jobname)), $(esc(mgrtype)), $(esc(nprocs))))
+end
+
+function readmgr(jobname::AbstractString)
+    mgrfile = joinpath(jobdirname(jobname), mgrfilename(jobname))
+    local mgr
+    open(mgrfile, "r") do f
+        mgr = deserialize(f)
+    end
+    mgr::JobManager
 end
 
 end # module
