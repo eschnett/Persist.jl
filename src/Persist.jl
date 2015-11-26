@@ -27,17 +27,44 @@ function sanitize(str::AbstractString)
     str
 end
 
-function quotestring(str::AbstractString)
-    # Quote backslashes and quotes
-    str = replace(str, r"\\", "\\\\")
-    str = replace(str, r"\"", "\\\"")
-    # Surround by quotes
-    str = "\"$str\""
-    str
+function juliaquote(str::AbstractString)
+    return "\"$(escape_string(str))\""
 end
 
-function quotestring{S<:AbstractString}(strs::Vector{S})
-    join(map(quotestring, strs), " ")
+function shellquote(str::AbstractString)
+    buf = IOBuffer()
+    inquote = false
+    for ch in str
+        if ch == '\''
+            # Escape single quotes via a backslash, outside of single quotes
+            if inquote
+                write(buf, '\'')
+                inquote = false
+            end
+            write(buf, "\\'")
+        else
+            # Escape all special characters via single quotes
+            if !(isascii(ch) && isalnum(ch) || ch in "-./_'")
+                if !inquote
+                    write(buf, '\'')
+                    inquote = true
+                end
+            end
+            write(buf, ch)
+        end
+    end
+    # Ensure the single quotes match
+    if inquote
+        write(buf, '\'')
+        inquote = false
+    end
+    @assert !inquote
+    # Ensure the result is not empty
+    if buf.size == 0
+        write(buf, "''")
+    end
+    @assert buf.size > 0
+    takebuf_string(buf)
 end
 
 function rmtree(path::AbstractString)
@@ -157,11 +184,9 @@ end
 function pidfilename(jobname::AbstractString)
     "$(sanitize(jobname)).pid"
 end
-function donefilename(jobname::AbstractString)
-    "$(sanitize(jobname)).done"
-end
 
-function submit(job, mgr::ProcessManager, nprocs::Integer)
+function submit(job, mgr::ProcessManager; usempi::Bool=false, nprocs::Integer=0)
+    @assert nprocs >= 0
     @assert status(mgr) == job_empty
     # Create job directory
     jobdir = jobdirname(mgr.jobname)
@@ -182,14 +207,31 @@ function submit(job, mgr::ProcessManager, nprocs::Integer)
     errfile = errfilename(mgr.jobname)
     shellfile = shellfilename(mgr.jobname)
     pidfile = pidfilename(mgr.jobname)
-    donefile = donefilename(mgr.jobname)
     open(joinpath(jobdir, shellfile), "w") do f
+        shellcmd = AbstractString[]
+        if usempi
+            push!(shellcmd, "mpiexec")
+            if nprocs>0
+                push!(shellcmd, "-n", "$nprocs")
+            end
+        end
+        append!(shellcmd, Base.julia_cmd().exec)
+        if !usempi
+            if nprocs>0
+                push!(shellcmd, "-p", "$nprocs")
+            end
+        end
+        juliacmd = "using Persist; Persist.runjob($(juliaquote(jobfile)), $(juliaquote(resultfile)))"
+        push!(shellcmd, "-e", juliacmd)
+        shellcmd = map(shellquote, shellcmd)
+        push!(shellcmd, "</dev/null")
+        push!(shellcmd, ">$(shellquote(outfile))")
+        push!(shellcmd, "2>$(shellquote(errfile))")
         print(f, """
 #! /bin/sh
 # This is an auto-generated Julia script for the Persist package
-echo \$\$ >$pidfile
-$(quotestring(Base.julia_cmd().exec)) -p $nprocs -e 'using Persist; Persist.runjob($(quotestring(jobfile)), $(quotestring(resultfile)))' </dev/null >$outfile 2>$errfile
-: >$donefile
+echo \$\$ >$(shellquote(pidfile))
+$(join(shellcmd, " "))
 """)
     end
     # Pre-create output files
@@ -225,14 +267,8 @@ function status(mgr::ProcessManager)
     # else
     #     job_done
     # end
-    donefile = joinpath(jobdirname(mgr.jobname), donefilename(mgr.jobname))
-    try
-        open(donefile, "r") do f end
-        resultfile =
-            joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
-        isfile(resultfile) && return job_done
-        return job_failed
-    end
+    resultfile = joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
+    isfile(resultfile) && return job_done
     job_running
 end
 
@@ -254,10 +290,8 @@ function cancel(mgr::ProcessManager; force::Bool=false)
     signum = force ? "SIGKILL" : "SIGTERM"
     run(pipeline(ignorestatus(`kill -$signum $(mgr.pid)`),
                  stdout=DevNull, stderr=DevNull))
-    # Remove the pid file since the job won't do it any more
     # TODO: The job may still be running, and we will never know.
-    donefile = joinpath(jobdirname(mgr.jobname), donefilename(mgr.jobname))
-    open(donefile, "w") do f end
+    # TODO: Mark the job as failed (or interrupted?)
     nothing
 end
 
@@ -267,7 +301,7 @@ end
 
 function wait(mgr::ProcessManager)
     @assert status(mgr) != job_empty
-    while status(mgr) != job_done
+    while !(status(mgr) in (job_done, job_failed))
         sleep(1)
     end
     nothing
@@ -276,9 +310,9 @@ end
 function fetch(mgr::ProcessManager)
     @assert status(mgr) != job_empty
     wait(mgr)
-    resultname = joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
+    resultfile = joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
     local result
-    open(resultname, "r") do f
+    open(resultfile, "r") do f
         result = deserialize(f)
     end
     result
@@ -349,11 +383,30 @@ function submit(job, mgr::SlurmManager, nprocs::Integer)
     errfile = errfilename(mgr.jobname)
     shellfile = shellfilename(mgr.jobname)
     open(joinpath(jobdir, shellfile), "w") do f
+        shellcmd = AbstractString[]
+        if usempi
+            push!(shellcmd, "mpiexec")
+            if nprocs>0
+                push!(shellcmd, "-n", "$nprocs")
+            end
+        end
+        append!(shellcmd, Base.julia_cmd().exec)
+        if !usempi
+            if nprocs>0
+                push!(shellcmd, "-p", "$nprocs")
+            end
+        end
+        juliacmd = "using Persist; Persist.runjob($(juliaquote(jobfile)), $(juliaquote(resultfile)))"
+        push!(shellcmd, "-e", juliacmd)
+        shellcmd = map(shellquote, shellcmd)
+        push!(shellcmd, "</dev/null")
+        push!(shellcmd, ">$(shellquote(outfile))")
+        push!(shellcmd, "2>$(shellquote(errfile))")
         print(f, """
 #! /bin/sh
 # This is an auto-generated Julia script for the Persist package
 hostname
-$(quotestring(Base.julia_cmd().exec)) -p $nprocs -e 'using Persist; Persist.runjob($(quotestring(jobfile)), $(quotestring(resultfile)))' </dev/null >$outfile 2>$errfile
+$(join(shellcmd, " "))
 """)
     end
     # Pre-create output files
@@ -418,7 +471,7 @@ end
 
 function wait(mgr::SlurmManager)
     @assert status(mgr) != job_empty
-    while status(mgr) != job_done
+    while !(status(mgr) in (job_done, job_failed))
         sleep(1)
     end
     nothing
@@ -426,9 +479,9 @@ end
 
 function fetch(mgr::SlurmManager)
     wait(mgr)
-    resultname = joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
+    resultfile = joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
     local result
-    open(resultname, "r") do f
+    open(resultfile, "r") do f
         result = deserialize(f)
     end
     result
@@ -455,16 +508,16 @@ end
 
 
 
-function persist{JM<:JobManager}(job, jobname::AbstractString, ::Type{JM},
-                                 nprocs::Integer)
+function persist{JM<:JobManager}(job, jobname::AbstractString, ::Type{JM};
+                                 usempi::Bool=false, nprocs::Integer=0)
     mgr = JM(jobname)
-    submit(job, mgr, nprocs)
+    submit(job, mgr, usempi=usempi, nprocs=nprocs)
     mgr::JM
 end
 
-macro persist(jobname, mgrtype, nprocs, expr)
+macro persist(jobname, mgrtype, expr)
     expr = Base.localize_vars(:(()->$expr), false)
-    :(persist($(esc(expr)), $(esc(jobname)), $(esc(mgrtype)), $(esc(nprocs))))
+    :(persist($(esc(expr)), $(esc(jobname)), $(esc(mgrtype))))
 end
 
 function readmgr(jobname::AbstractString)

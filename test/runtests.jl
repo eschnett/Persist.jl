@@ -7,7 +7,7 @@ try rm("hello2.job", recursive=true) end
 try rm("hello3.job", recursive=true) end
 try rm("Trash", recursive=true) end
 
-hello = persist("hello", ProcessManager, 1) do
+hello = persist("hello", ProcessManager) do
     sleep(1)
     println("Hello, World!")
     42
@@ -27,7 +27,7 @@ cleanup(hello1)
 
 const msg = "Hello, World!"
 const res = result
-hello = @persist "hello2" ProcessManager 1 begin
+hello = @persist "hello2" ProcessManager begin
     sleep(1)
     println(msg)
     res
@@ -49,7 +49,7 @@ try
 end
 
 if have_slurm
-    hello = persist("hello3", SlurmManager, 1) do
+    hello = persist("hello3", SlurmManager, nprocs=2) do
         sleep(1)
         println("Hello, World!")
         "Hello, World!"
