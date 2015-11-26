@@ -6,11 +6,12 @@ module Persist
 # TODO: use JLD for repeatability
 # using JLD
 
-import Base: serialize, deserialize
-export serialize, deserialize
+import Base: serialize, deserialize, isready, wait, fetch
+export serialize, deserialize, isready, wait, fetch
 
 export JobManager, ProcessManager, SlurmManager
-export status, jobinfo, cancel, waitjob, getstdout, getstderr, cleanup
+export JobStatus, job_empty, job_queued, job_running, job_done, job_failed
+export status, jobinfo, cancel, getstdout, getstderr, cleanup
 export persist, @persist, readmgr
 
 
@@ -69,7 +70,7 @@ function rmtree(path::AbstractString)
     end
     nothing
 end
-    
+
 
 
 function jobdirname(jobname::AbstractString)
@@ -78,6 +79,10 @@ end
 
 function jobfilename(jobname::AbstractString)
     "$(sanitize(jobname)).bin"
+end
+
+function resultfilename(jobname::AbstractString)
+    "$(sanitize(jobname)).res"
 end
 
 function outfilename(jobname::AbstractString)
@@ -100,14 +105,27 @@ end
 
 abstract JobManager
 
+@enum JobStatus job_empty job_queued job_running job_done job_failed
 
 
-function runjob(jobfile::AbstractString)
+
+function runjob(jobfile::AbstractString, resultfile::AbstractString)
+    tmpfile = "$resultfile.tmp"
+    try rm(resultfile) end
+    try rm(tmpfile) end
     local job
     open(jobfile, "r") do f
         job = deserialize(f)
     end
-    job()
+    result = job()
+    try
+        open(tmpfile, "w") do f
+            serialize(f, result)
+        end
+        mv(tmpfile, resultfile)
+    finally
+        try rm(tmpfile) end
+    end
 end
 
 
@@ -144,7 +162,7 @@ function donefilename(jobname::AbstractString)
 end
 
 function submit(job, mgr::ProcessManager, nprocs::Integer)
-    @assert status(mgr) == :empty
+    @assert status(mgr) == job_empty
     # Create job directory
     jobdir = jobdirname(mgr.jobname)
     try
@@ -159,6 +177,7 @@ function submit(job, mgr::ProcessManager, nprocs::Integer)
         serialize(f, job)
     end
     # Create a wrapper script
+    resultfile = resultfilename(mgr.jobname)
     outfile = outfilename(mgr.jobname)
     errfile = errfilename(mgr.jobname)
     shellfile = shellfilename(mgr.jobname)
@@ -169,7 +188,7 @@ function submit(job, mgr::ProcessManager, nprocs::Integer)
 #! /bin/sh
 # This is an auto-generated Julia script for the Persist package
 echo \$\$ >$pidfile
-$(quotestring(Base.julia_cmd().exec)) -p $nprocs -e 'using Persist; Persist.runjob($(quotestring(jobfile)))' </dev/null >$outfile 2>$errfile
+$(quotestring(Base.julia_cmd().exec)) -p $nprocs -e 'using Persist; Persist.runjob($(quotestring(jobfile)), $(quotestring(resultfile)))' </dev/null >$outfile 2>$errfile
 : >$donefile
 """)
     end
@@ -197,39 +216,41 @@ $(quotestring(Base.julia_cmd().exec)) -p $nprocs -e 'using Persist; Persist.runj
     nothing
 end
 
-"""status(mgr::JobManager) returns either :empty, :queued, :running, or :done"""
 function status(mgr::ProcessManager)
-    if mgr.pid < 0 return :empty end
+    if mgr.pid < 0 return job_empty end
     # It seems that we can't check the process pid, since the process will
     # live too long -- this is probably a problem in detach
     # if success(pipeline(`ps -p $(mgr.pid)`, stdout=DevNull, stderr=DevNull))
-    #     :running
+    #     job_running
     # else
-    #     :done
+    #     job_done
     # end
     donefile = joinpath(jobdirname(mgr.jobname), donefilename(mgr.jobname))
     try
         open(donefile, "r") do f end
-        return :done
+        resultfile =
+            joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
+        isfile(resultfile) && return job_done
+        return job_failed
     end
-    :running
+    job_running
 end
 
 function jobinfo(mgr::ProcessManager)
     st = status(mgr)
-    @assert st != :empty
-    if st == :queued return "[:queued]" end
-    if st == :running
+    @assert st != job_empty
+    if st == job_queued return "[job_queued]" end
+    if st == job_running
         try
             return readall(`ps -f -p $(mgr.pid)`)
         end
         # `ps` failed; most likely because the process does not exist any more
     end
-    "[:done]"
+    "[job_done]"
 end
 
 function cancel(mgr::ProcessManager; force::Bool=false)
-    @assert status(mgr) != :empty
+    @assert status(mgr) != job_empty
     signum = force ? "SIGKILL" : "SIGTERM"
     run(pipeline(ignorestatus(`kill -$signum $(mgr.pid)`),
                  stdout=DevNull, stderr=DevNull))
@@ -240,26 +261,41 @@ function cancel(mgr::ProcessManager; force::Bool=false)
     nothing
 end
 
-function waitjob(mgr::ProcessManager)
-    @assert status(mgr) != :empty
-    while status(mgr) == :running
+function isready(mgr::ProcessManager)
+    return status(mgr) == job_done
+end
+
+function wait(mgr::ProcessManager)
+    @assert status(mgr) != job_empty
+    while status(mgr) != job_done
         sleep(1)
     end
     nothing
 end
 
+function fetch(mgr::ProcessManager)
+    @assert status(mgr) != job_empty
+    wait(mgr)
+    resultname = joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
+    local result
+    open(resultname, "r") do f
+        result = deserialize(f)
+    end
+    result
+end
+
 function getstdout(mgr::ProcessManager)
-    @assert status(mgr) != :empty
+    @assert status(mgr) != job_empty
     readall(joinpath(jobdirname(mgr.jobname), outfilename(mgr.jobname)))
 end
 
 function getstderr(mgr::ProcessManager)
-    @assert status(mgr) != :empty
+    @assert status(mgr) != job_empty
     readall(joinpath(jobdirname(mgr.jobname), errfilename(mgr.jobname)))
 end
 
 function cleanup(mgr::ProcessManager)
-    @assert status(mgr) == :done
+    @assert status(mgr) in (job_done, job_failed)
     rmtree(jobdirname(mgr.jobname))
     mgr.pid = -1
     nothing
@@ -292,7 +328,7 @@ function deserialize(s::Base.SerializationState, ::Type{SlurmManager})
 end
 
 function submit(job, mgr::SlurmManager, nprocs::Integer)
-    @assert status(mgr) == :empty
+    @assert status(mgr) == job_empty
     # Create job directory
     jobdir = jobdirname(mgr.jobname)
     jobdir = abspath(jobdir)
@@ -308,6 +344,7 @@ function submit(job, mgr::SlurmManager, nprocs::Integer)
         serialize(f, job)
     end
     # Create a wrapper script
+    resultfile = resultfilename(mgr.jobname)
     outfile = outfilename(mgr.jobname)
     errfile = errfilename(mgr.jobname)
     shellfile = shellfilename(mgr.jobname)
@@ -316,7 +353,7 @@ function submit(job, mgr::SlurmManager, nprocs::Integer)
 #! /bin/sh
 # This is an auto-generated Julia script for the Persist package
 hostname
-$(quotestring(Base.julia_cmd().exec)) -p $nprocs -e 'using Persist; Persist.runjob($(quotestring(jobfile)))' </dev/null >$outfile 2>$errfile
+$(quotestring(Base.julia_cmd().exec)) -p $nprocs -e 'using Persist; Persist.runjob($(quotestring(jobfile)), $(quotestring(resultfile)))' </dev/null >$outfile 2>$errfile
 """)
     end
     # Pre-create output files
@@ -337,65 +374,80 @@ $(quotestring(Base.julia_cmd().exec)) -p $nprocs -e 'using Persist; Persist.runj
     nothing
 end
 
-"""status(mgr::JobManager) returns either :empty, :queued, :running, or :done"""
 function status(mgr::SlurmManager)
-    if isempty(mgr.jobid) return :empty end
+    if isempty(mgr.jobid) return job_empty end
     try
         buf = readall(`squeue -h -j $(mgr.jobid) -o '%t'`)
         state = chomp(buf)
         if state in ["CF", "PD"]
-            return :queued
+            return job_queued
         elseif state in ["CG", "R", "S"]
-            return :running
+            return jo_running
         elseif state in ["CA", "CD", "F", "NF", "PR", "TO"]
-            return :done
+            return job_done
         else
             @assert false
         end
     end
     # Slurm knows nothing about this job
-    :done
+    resultfile = joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
+    isfile(resultfile) && job_done
+    job_failed
 end
 
 function jobinfo(mgr::SlurmManager)
     st = status(mgr)
-    @assert st != :empty
+    @assert st != job_empty
     try
         return readall(`squeue -j $(mgr.jobid)`)
     end
     # Slurm knows nothing about this job
-    "[:done]"
+    "[job_done]"
 end
 
 function cancel(mgr::SlurmManager; force::Bool=false)
-    @assert status(mgr) != :empty
+    @assert status(mgr) != job_empty
     # TODO: Handle things differently for force=false and force=true
     run(`scancel -j $(mgr.jobid)`)
     nothing
 end
 
-function waitjob(mgr::SlurmManager)
-    @assert status(mgr) != :empty
-    while status(mgr) != :done
+function isready(mgr::SlurmManager)
+    return status(mgr) == job_done
+end
+
+function wait(mgr::SlurmManager)
+    @assert status(mgr) != job_empty
+    while status(mgr) != job_done
         sleep(1)
     end
     nothing
 end
 
+function fetch(mgr::SlurmManager)
+    wait(mgr)
+    resultname = joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
+    local result
+    open(resultname, "r") do f
+        result = deserialize(f)
+    end
+    result
+end
+
 function getstdout(mgr::SlurmManager)
-    @assert status(mgr) != :empty
+    @assert status(mgr) != job_empty
     # TODO: Read stdout while job is running
     readall(joinpath(jobdirname(mgr.jobname), outfilename(mgr.jobname)))
 end
 
 function getstderr(mgr::SlurmManager)
-    @assert status(mgr) != :empty
+    @assert status(mgr) != job_empty
     # TODO: Read stdout while job is running
     readall(joinpath(jobdirname(mgr.jobname), errfilename(mgr.jobname)))
 end
 
 function cleanup(mgr::SlurmManager)
-    @assert status(mgr) == :done
+    @assert status(mgr) in (job_done, job_failed)
     rmtree(jobdirname(mgr.jobname))
     mgr.jobid = ""
     nothing

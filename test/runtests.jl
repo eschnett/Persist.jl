@@ -10,27 +10,33 @@ try rm("Trash", recursive=true) end
 hello = persist("hello", ProcessManager, 1) do
     sleep(1)
     println("Hello, World!")
+    42
 end
-@test status(hello) == :running
+@test status(hello) == job_running
 @unix_only @test ismatch(r"sh hello", jobinfo(hello))
-waitjob(hello)
-@test status(hello) == :done
+wait(hello)
+@test status(hello) == job_done
 @test getstdout(hello) == "Hello, World!\n"
 @test getstderr(hello) == ""
+result = fetch(hello)
+@test result == 42
 
 hello1 = readmgr("hello")
-@test status(hello1) == :done
+@test status(hello1) == job_done
 cleanup(hello1)
 
 const msg = "Hello, World!"
+const res = result
 hello = @persist "hello2" ProcessManager 1 begin
     sleep(1)
     println(msg)
+    res
 end
-@test status(hello) == :running
+@test status(hello) == job_running
 cancel(hello)
-waitjob(hello)
-@test status(hello) == :done
+wait(hello)
+@test status(hello) == job_done
+@test fetch(hello) == result
 cleanup(hello)
 # TODO: Use glob instead of shell
 @unix_only @test readall(`sh -c 'echo hello*'`) == "hello*\n"
@@ -46,11 +52,13 @@ if have_slurm
     hello = persist("hello3", SlurmManager, 1) do
         sleep(1)
         println("Hello, World!")
+        "Hello, World!"
     end
-    @test status(hello) in [:queued, :running]
+    @test status(hello) in [job_queued, job_running]
     @unix_only @test ismatch(r"hello", jobinfo(hello))
-    waitjob(hello)
-    @test status(hello) == :done
+    wait(hello)
+    @test status(hello) == job_done
+    @test fetch(hello) == "Hello, World!"
     @test getstdout(hello) == "Hello, World!\n"
     @test getstderr(hello) == ""
     cleanup(hello)
