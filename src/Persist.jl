@@ -3,9 +3,6 @@ module Persist
 # TODO: use ClusterManagers
 # using ClusterManagers
 
-# TODO: use JLD for repeatability
-# using JLD
-
 import Base: serialize, deserialize, isready, wait, fetch
 export serialize, deserialize, isready, wait, fetch
 
@@ -16,7 +13,7 @@ export persist, @persist, readmgr
 
 
 
-"""Allow only Posix fully portable filenames"""
+"Sanitize a a file name; allow only Posix fully portable filenames"
 function sanitize(str::AbstractString)
     # Only allow certain characters
     str = replace(str, r"[^-A-Za-z0-9._]", "")
@@ -27,10 +24,12 @@ function sanitize(str::AbstractString)
     str
 end
 
+"Quote a string for use in Julia"
 function juliaquote(str::AbstractString)
     return "\"$(escape_string(str))\""
 end
 
+"Quote a string for use as a shell argument"
 function shellquote(str::AbstractString)
     buf = IOBuffer()
     inquote = false
@@ -67,6 +66,7 @@ function shellquote(str::AbstractString)
     takebuf_string(buf)
 end
 
+"Remove a directory tree, handling temporary failures gracefully"
 function rmtree(path::AbstractString)
     try
         rm(path, recursive=true)
@@ -100,51 +100,65 @@ end
 
 
 
+"Directory for a job"
 function jobdirname(jobname::AbstractString)
     "$(sanitize(jobname)).job"
 end
 
+"File name for serialized job"
 function jobfilename(jobname::AbstractString)
     "$(sanitize(jobname)).bin"
 end
 
+"File name for serialized job result"
 function resultfilename(jobname::AbstractString)
     "$(sanitize(jobname)).res"
 end
 
+"File name for job's stdout"
 function outfilename(jobname::AbstractString)
     "$(sanitize(jobname)).out"
 end
 
+"File name for job's stderr"
 function errfilename(jobname::AbstractString)
     "$(sanitize(jobname)).err"
 end
 
+"File name for serialize job manager"
 function mgrfilename(jobname::AbstractString)
     "$(sanitize(jobname)).mgr"
 end
 
+"File name for shell script wrapper that starts the job"
 function shellfilename(jobname::AbstractString)
     "$(sanitize(jobname)).sh"
 end
 
 
 
+"Abstract base class for all job managers"
 abstract JobManager
 
+"Job status codes"
 @enum JobStatus job_empty job_queued job_running job_done job_failed
 
 
 
+"`runjob` is called from the shell script to execute the job"
 function runjob(jobfile::AbstractString, resultfile::AbstractString)
+    # Delete any existing job results
     tmpfile = "$resultfile.tmp"
     try rm(resultfile) end
     try rm(tmpfile) end
+    # Deserialize the job
     local job
     open(jobfile, "r") do f
         job = deserialize(f)
     end
+    # Run the job
     result = job()
+    # Serialize the result
     try
         open(tmpfile, "w") do f
             serialize(f, result)
@@ -157,6 +171,7 @@ end
 
 
 
+"Process job manager: A job manager based on Julia processes"
 type ProcessManager <: JobManager
     jobname::AbstractString
     pid::Int32
@@ -181,10 +196,12 @@ function deserialize(s::Base.SerializationState, ::Type{ProcessManager})
     mgr
 end
 
+"File name holding job's pid (process id)"
 function pidfilename(jobname::AbstractString)
     "$(sanitize(jobname)).pid"
 end
 
+"Submit a job"
 function submit(job, mgr::ProcessManager; usempi::Bool=false, nprocs::Integer=0)
     @assert nprocs >= 0
     @assert status(mgr) == job_empty
@@ -259,6 +276,7 @@ $(join(shellcmd, " "))
     nothing
 end
 
+"Get job status code"
 function status(mgr::ProcessManager)
     if mgr.pid < 0 return job_empty end
     # It seems that we can't check the process pid, since the process will
@@ -273,6 +291,7 @@ function status(mgr::ProcessManager)
     job_running
 end
 
+"Get job info string"
 function jobinfo(mgr::ProcessManager)
     st = status(mgr)
     @assert st != job_empty
@@ -286,6 +305,7 @@ function jobinfo(mgr::ProcessManager)
     "[job_done]"
 end
 
+"Cancel a job"
 function cancel(mgr::ProcessManager; force::Bool=false)
     @assert status(mgr) != job_empty
     signum = force ? "SIGKILL" : "SIGTERM"
@@ -296,10 +316,12 @@ function cancel(mgr::ProcessManager; force::Bool=false)
     nothing
 end
 
+"Check whether a job is done"
 function isready(mgr::ProcessManager)
     return status(mgr) == job_done
 end
 
+"Wait until a job is done"
 function wait(mgr::ProcessManager)
     @assert status(mgr) != job_empty
     while !(status(mgr) in (job_done, job_failed))
@@ -308,6 +330,7 @@ function wait(mgr::ProcessManager)
     nothing
 end
 
+"Fetch job result"
 function fetch(mgr::ProcessManager)
     @assert status(mgr) != job_empty
     wait(mgr)
@@ -319,16 +342,19 @@ function fetch(mgr::ProcessManager)
     result
 end
 
+"Get stdout from a job"
 function getstdout(mgr::ProcessManager)
     @assert status(mgr) != job_empty
     readall(joinpath(jobdirname(mgr.jobname), outfilename(mgr.jobname)))
 end
 
+"Get stderr from a job"
 function getstderr(mgr::ProcessManager)
     @assert status(mgr) != job_empty
     readall(joinpath(jobdirname(mgr.jobname), errfilename(mgr.jobname)))
 end
 
+"Clean up after a job (delete all traces of the job, including its result)"
 function cleanup(mgr::ProcessManager)
     @assert status(mgr) in (job_done, job_failed)
     rmtree(jobdirname(mgr.jobname))
@@ -338,6 +364,7 @@ end
 
 
 
+"Slurm job manager: A job manager using the Slurm queuing system"
 type SlurmManager <: JobManager
     jobname::AbstractString
     jobid::AbstractString
@@ -362,6 +389,7 @@ function deserialize(s::Base.SerializationState, ::Type{SlurmManager})
     mgr
 end
 
+"Submit a job"
 function submit(job, mgr::SlurmManager; usempi::Bool=false, nprocs::Integer=0)
     @assert nprocs >= 0
     @assert status(mgr) == job_empty
@@ -429,6 +457,7 @@ $(join(shellcmd, " "))
     nothing
 end
 
+"Get job status code"
 function status(mgr::SlurmManager)
     if isempty(mgr.jobid) return job_empty end
     try
@@ -450,6 +479,7 @@ function status(mgr::SlurmManager)
     job_failed
 end
 
+"Get job info string"
 function jobinfo(mgr::SlurmManager)
     st = status(mgr)
     @assert st != job_empty
@@ -460,6 +490,7 @@ function jobinfo(mgr::SlurmManager)
     "[job_done]"
 end
 
+"Cancel a job"
 function cancel(mgr::SlurmManager; force::Bool=false)
     @assert status(mgr) != job_empty
     # TODO: Handle things differently for force=false and force=true
@@ -467,10 +498,12 @@ function cancel(mgr::SlurmManager; force::Bool=false)
     nothing
 end
 
+"Check whether a job is done"
 function isready(mgr::SlurmManager)
     return status(mgr) == job_done
 end
 
+"Wait until a job is done"
 function wait(mgr::SlurmManager)
     @assert status(mgr) != job_empty
     while !(status(mgr) in (job_done, job_failed))
@@ -479,6 +512,7 @@ function wait(mgr::SlurmManager)
     nothing
 end
 
+"Fetch job result"
 function fetch(mgr::SlurmManager)
     wait(mgr)
     resultfile = joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
@@ -489,18 +523,21 @@ function fetch(mgr::SlurmManager)
     result
 end
 
+"Get stdout from a job"
 function getstdout(mgr::SlurmManager)
     @assert status(mgr) != job_empty
     # TODO: Read stdout while job is running
     readall(joinpath(jobdirname(mgr.jobname), outfilename(mgr.jobname)))
 end
 
+"Get stderr from a job"
 function getstderr(mgr::SlurmManager)
     @assert status(mgr) != job_empty
     # TODO: Read stdout while job is running
     readall(joinpath(jobdirname(mgr.jobname), errfilename(mgr.jobname)))
 end
 
+"Clean up after a job (delete all traces of the job, including its result)"
 function cleanup(mgr::SlurmManager)
     @assert status(mgr) in (job_done, job_failed)
     rmtree(jobdirname(mgr.jobname))
@@ -510,6 +547,7 @@ end
 
 
 
+"Start a job"
 function persist{JM<:JobManager}(job, jobname::AbstractString, ::Type{JM};
                                  usempi::Bool=false, nprocs::Integer=0)
     mgr = JM(jobname)
@@ -517,6 +555,7 @@ function persist{JM<:JobManager}(job, jobname::AbstractString, ::Type{JM};
     mgr::JM
 end
 
+"Start a job"
 macro persist(jobname, mgrtype, expr)
     expr = Base.localize_vars(:(()->$expr), false)
     :(persist($(esc(expr)), $(esc(jobname)), $(esc(mgrtype))))
@@ -526,6 +565,7 @@ macro persist(jobname, mgrtype, expr)
     # end
 end
 
+"Read job manager from file"
 function readmgr(jobname::AbstractString)
     mgrfile = joinpath(jobdirname(jobname), mgrfilename(jobname))
     local mgr
