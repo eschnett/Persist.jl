@@ -28,15 +28,12 @@ Here is an example:
 ```Julia
 using Persist
 
-# Define a function
-function hello()
+# Start a calculation in the background
+job = @persist "hello" ProcessManager begin
     sleep(10)   # Simulate a long-running task
     println("Hello, World!")   # Produce some output
     return [42]   # Return a value
 end
-
-# Run the function in the background
-job = @persist "hello" ProcessManager hello()
 
 # Do something else
 
@@ -54,12 +51,14 @@ cleanup(job)
 You can also use Slurm to submit a job:
 
 ```Julia
-@persist "calcpi" SlurmManager (wait 10; big(pi))
+using Persist
+
+@persist "calcpi" SlurmManager (sleep(10); big(pi))
 
 # Jobs are written to file, and can be read back in
 job = readmgr("calcpi")
 jobinfo(job)
-println("pi = $(fetch(job)))
+println("pi = $(fetch(job))")
 cleanup(job)
 ```
 
@@ -68,6 +67,8 @@ cleanup(job)
 Simple, really.
 
 The Julia expression is serialized and written to a file. A shell script is generated that is executed in the background (or via Slurm). This script reads the expression, executes it, and serializes the result to another file. Various commands examine the status of the job. `fetch` deserializes the result once the job has finished.
+
+This is very similar to the way in which `@spawn` or `@everywhere` works, except that the expression is evaluated independently of the Julia shell. The same caveats regarding defining functions and using modules apply.
 
 ## Reference
 
