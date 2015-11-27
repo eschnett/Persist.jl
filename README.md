@@ -72,7 +72,7 @@ This is very similar to the way in which `@spawn` or `@everywhere` works, except
 
 ## Reference
 
-### Create a job
+#### Create a new job
 ```Julia
 mgr = @persist name manager expression
 mgr = persist(function, name, manager)
@@ -82,48 +82,48 @@ mgr = persist(function, name, manager)
 - `expression::Any`, `function::Any`: Expression or function to evaluate
 - `mgr::JobManager`: Job manager object
 
-### Read a job descriptor from file
+#### Read a job descriptor from file
 ```Julia
 mgr = readmgr(name)
 ```
 - `name::AbstractString`: Job name
 - `mgr::JobManager`: Job manager object
 
-### Determine job status
+#### Determine job status
 ```Julia
 st = status(mgr)
 ```
 - `mgr::JobManager`: Job manager object
 - `st::JobStatus`: Job status; one of `job_empty`, `job_queued`, `job_runnig`, `job_done`, `job_failed`
 
-### Describe job status
+#### Describe job status
 ```Julia
 st = jobinfo(mgr)
 ```
 - `mgr::JobManager`: Job manager object
 - `st::AbstractString`: Human-readable job status description, as e.g. output by `ps` or `squeue`
 
-### Cancel (abort) job
+#### Cancel (abort) job
 ```Julia
 cancel(mgr)
 ```
 - `mgr::JobManager`: Job manager object
 
-### Determine whether job is done
+#### Determine whether job is done
 ```Julia
 st = isready(mgr)
 ```
 - `mgr::JobManager`: Job manager object
 - `st::Bool`: Whether the job is done
 
-### Wait for a job to complete
+#### Wait for a job to complete
 ```Julia
 wait(mgr)
 ```
 - `mgr::JobManager`: Job manager object
 After waiting, `isready(mgr) == true`.
 
-### Obtain job result
+#### Obtain job result
 ```Julia
 result = fetch(mgr)
 ```
@@ -131,7 +131,7 @@ result = fetch(mgr)
 - `result::Any`: Job result (i.e. its return value)
 Wait for the job to complete, then return the job's result.
 
-### Obtain job output
+#### Obtain job output
 ```Julia
 out = getstdout(mgr)
 err = getstderr(mgr)
@@ -141,7 +141,7 @@ err = getstderr(mgr)
 - `err::AbstractString`: Job output (what the job wrote to `stderr`)
 Partial job output may (or may not) be available while the job is running.
 
-### Clean up after a job
+#### Clean up after a job
 ```Julia
 cleanup(mgr)
 ```
