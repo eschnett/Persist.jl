@@ -190,6 +190,7 @@ function submit(job, mgr::ProcessManager; usempi::Bool=false, nprocs::Integer=0)
     @assert status(mgr) == job_empty
     # Create job directory
     jobdir = jobdirname(mgr.jobname)
+    jobdir = abspath(jobdir)
     try
         mkdir(jobdir)
     catch
@@ -361,7 +362,8 @@ function deserialize(s::Base.SerializationState, ::Type{SlurmManager})
     mgr
 end
 
-function submit(job, mgr::SlurmManager, nprocs::Integer)
+function submit(job, mgr::SlurmManager; usempi::Bool=false, nprocs::Integer=0)
+    @assert nprocs >= 0
     @assert status(mgr) == job_empty
     # Create job directory
     jobdir = jobdirname(mgr.jobname)
