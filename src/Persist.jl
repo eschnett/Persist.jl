@@ -520,6 +520,10 @@ end
 macro persist(jobname, mgrtype, expr)
     expr = Base.localize_vars(:(()->$expr), false)
     :(persist($(esc(expr)), $(esc(jobname)), $(esc(mgrtype))))
+    # quote
+    #     expr = ()->eval(Main, $(Expr(:quote, expr)))
+    #     persist(expr, $(esc(jobname)), $(esc(mgrtype)))
+    # end
 end
 
 function readmgr(jobname::AbstractString)
