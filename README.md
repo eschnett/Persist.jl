@@ -79,12 +79,70 @@ mgr = persist(function, name, manager)
 - `name::AbstractString`: Job name
 - `manager::JobManager`: Either `ProcessManager` or `SlurmManager`
 - `expression::Any`, `function::Any`: Expression or function to evaluate
+- `mgr::JobManager`: Job manager object
 
+### Read a job descriptor from file
+```Julia
 mgr = readmgr(name)
-status(mgr)
-jobinfo(mgr)
+```
+- `name::AbstractString`: Job name
+- `mgr::JobManager`: Job manager object
+
+### Determine job status
+```Julia
+st = status(mgr)
+```
+- `mgr::JobManager`: Job manager object
+- `st::JobStatus`: Job status; one of `job_empty`, `job_queued`, `job_runnig`, `job_done`, `job_failed`
+
+### Describe job status
+```Julia
+st = jobinfo(mgr)
+```
+- `mgr::JobManager`: Job manager object
+- `st::AbstractString`: Human-readable job status description, as e.g. output by `ps` or `squeue`
+
+### Cancel (abort) job
+```Julia
 cancel(mgr)
+```
+- `mgr::JobManager`: Job manager object
+
+### Determine whether job is done
+```Julia
+st = isready(mgr)
+```
+- `mgr::JobManager`: Job manager object
+- `st::Bool`: Whether the job is done
+
+### Wait for a job to complete
+```Julia
 wait(mgr)
-fetch(mgr)
+```
+- `mgr::JobManager`: Job manager object
+After waiting, `isready(mgr) == true`.
+
+### Obtain job result
+```Julia
+result = fetch(mgr)
+```
+- `mgr::JobManager`: Job manager object
+- `result::Any`: Job result (i.e. its return value)
+Wait for the job to complete, then return the job's result.
+
+### Obtain job output
+```Julia
+out = getstdout(mgr)
+err = getstderr(mgr)
+```
+- `mgr::JobManager`: Job manager object
+- `out::AbstractString`: Job output (what the job wrote to `stdout`)
+- `err::AbstractString`: Job output (what the job wrote to `stderr`)
+Partial job output may (or may not) be available while the job is running.
+
+### Clean up after a job
+```Julia
 cleanup(mgr)
 ```
+- `mgr::JobManager`: Job manager object
+This deletes all information about the job, its result, and its output.
