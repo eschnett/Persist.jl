@@ -151,7 +151,6 @@ abstract JobManager
 function runjob(jobfile::AbstractString, resultfile::AbstractString)
     # Delete any existing job results
     tmpfile = "$resultfile.tmp"
-    try rm(resultfile) end
     try rm(tmpfile) end
     # Deserialize the job
     local job
@@ -161,13 +160,8 @@ function runjob(jobfile::AbstractString, resultfile::AbstractString)
     # Run the job
     result = job()
     # Serialize the result
-    try
-        open(tmpfile, "w") do f
-            serialize(f, result)
-        end
-        mv(tmpfile, resultfile)
-    finally
-        try rm(tmpfile) end
+    open(tmpfile, "w") do f
+        serialize(f, result)
     end
 end
 
@@ -222,12 +216,21 @@ function submit(job, mgr::ProcessManager; usempi::Bool=false, nprocs::Integer=0,
     open(joinpath(jobdir, jobfile), "w") do f
         serialize(f, job)
     end
-    # Create a wrapper script
+    # Define file names
+    pidfile = pidfilename(mgr.jobname)
     resultfile = resultfilename(mgr.jobname)
     outfile = outfilename(mgr.jobname)
     errfile = errfilename(mgr.jobname)
     shellfile = shellfilename(mgr.jobname)
-    pidfile = pidfilename(mgr.jobname)
+    # Delete any previous result files
+    try rm(joinpath(jobdir, "$pidfile.tmp")) end
+    try rm(joinpath(jobdir, pidfile)) end
+    try rm(joinpath(jobdir, "$resultfile.tmp")) end
+    try rm(joinpath(jobdir, resultfile)) end
+    # Pre-create output files
+    open(joinpath(jobdir, outfile), "w") do f end
+    open(joinpath(jobdir, errfile), "w") do f end
+    # Create a wrapper script
     open(joinpath(jobdir, shellfile), "w") do f
         shellcmd = AbstractString[]
         if usempi
@@ -253,24 +256,20 @@ function submit(job, mgr::ProcessManager; usempi::Bool=false, nprocs::Integer=0,
         print(f, """
 #! /bin/sh
 # This is an auto-generated Julia script for the Persist package
-echo \$\$ >$(shellquote(pidfile))
+echo \$\$ >$(shellquote("$pidfile.tmp"))
+mv $(shellquote("$pidfile.tmp")) $(shellquote(pidfile))
 $(join(shellcmd, " "))
+mv $(shellquote("$resultfile.tmp")) $(shellquote(resultfile))
 """)
     end
-    # Pre-create output files
-    open(joinpath(jobdir, outfile), "w") do f end
-    open(joinpath(jobdir, errfile), "w") do f end
-    open(joinpath(jobdir, pidfile), "w") do f end
     # Start the job in the job directory
     spawn(detach(setenv(`sh $(mgropts...) $shellfile`, dir=jobdir)))
     # Wait for the job to output its pid
     # TODO: We should get the pid from spwan, but I don't know how
-    local buf
-    while true
-        buf = readstring(joinpath(jobdir, pidfile))
-        if endswith(buf, '\n') break end
+    while !isfile(joinpath(jobdir, pidfile))
         sleep(0.1)
     end
+    buf = readstring(joinpath(jobdir, pidfile))
     mgr.pid = parse(Int, buf)
     info("Process id: $(mgr.pid)")
     # Serialize the manager
@@ -416,11 +415,18 @@ function submit(job, mgr::PBSManager; usempi::Bool=false, nprocs::Integer=0,
     open(joinpath(jobdir, jobfile), "w") do f
         serialize(f, job)
     end
-    # Create a wrapper script
+    # Define file names
     resultfile = resultfilename(mgr.jobname)
     outfile = outfilename(mgr.jobname)
     errfile = errfilename(mgr.jobname)
     shellfile = shellfilename(mgr.jobname)
+    # Delete any previous result files
+    try rm(joinpath(jobdir, "$resultfile.tmp")) end
+    try rm(joinpath(jobdir, resultfile)) end
+    # Pre-create output files
+    open(joinpath(jobdir, outfile), "w") do f end
+    open(joinpath(jobdir, errfile), "w") do f end
+    # Create a wrapper script
     open(joinpath(jobdir, shellfile), "w") do f
         shellcmd = AbstractString[]
         if usempi
@@ -448,11 +454,9 @@ function submit(job, mgr::PBSManager; usempi::Bool=false, nprocs::Integer=0,
 # This is an auto-generated Julia script for the Persist package
 hostname
 $(join(shellcmd, " "))
+mv $(shellquote("$resultfile.tmp")) $(shellquote(resultfile))
 """)
     end
-    # Pre-create output files
-    open(joinpath(jobdir, outfile), "w") do f end
-    open(joinpath(jobdir, errfile), "w") do f end
     # Start the job in the job directory
     # TODO: Teach Julia how to use the nodes that PBS reserved
     buf = readstring(setenv(`qsub -D $jobdir -N $(mgr.jobname) -l nodes=$nprocs $(mgropts...) $shellfile`,
@@ -603,11 +607,18 @@ function submit(job, mgr::SlurmManager; usempi::Bool=false, nprocs::Integer=0,
     open(joinpath(jobdir, jobfile), "w") do f
         serialize(f, job)
     end
-    # Create a wrapper script
+    # Define file names
     resultfile = resultfilename(mgr.jobname)
     outfile = outfilename(mgr.jobname)
     errfile = errfilename(mgr.jobname)
     shellfile = shellfilename(mgr.jobname)
+    # Delete any previous result files
+    try rm(joinpath(jobdir, "$resultfile.tmp")) end
+    try rm(joinpath(jobdir, resultfile)) end
+    # Pre-create output files
+    open(joinpath(jobdir, outfile), "w") do f end
+    open(joinpath(jobdir, errfile), "w") do f end
+    # Create a wrapper script
     open(joinpath(jobdir, shellfile), "w") do f
         shellcmd = AbstractString[]
         if usempi
@@ -635,11 +646,9 @@ function submit(job, mgr::SlurmManager; usempi::Bool=false, nprocs::Integer=0,
 # This is an auto-generated Julia script for the Persist package
 hostname
 $(join(shellcmd, " "))
+mv $(shellquote("$resultfile.tmp")) $(shellquote(resultfile))
 """)
     end
-    # Pre-create output files
-    open(joinpath(jobdir, outfile), "w") do f end
-    open(joinpath(jobdir, errfile), "w") do f end
     # Start the job in the job directory
     # TODO: Teach Julia how to use the nodes that Slurm reserved
     buf = readstring(setenv(`sbatch -D $jobdir -J $(mgr.jobname) -n $nprocs $(mgropts...) $shellfile`,
