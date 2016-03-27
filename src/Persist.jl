@@ -204,7 +204,8 @@ function pidfilename(jobname::AbstractString)
 end
 
 "Submit a job"
-function submit(job, mgr::ProcessManager; usempi::Bool=false, nprocs::Integer=0)
+function submit(job, mgr::ProcessManager; usempi::Bool=false, nprocs::Integer=0,
+                mgropts=[], mpiopts=[], juliaopts=[])
     @assert nprocs >= 0
     @assert status(mgr) == job_empty
     # Create job directory
@@ -234,6 +235,7 @@ function submit(job, mgr::ProcessManager; usempi::Bool=false, nprocs::Integer=0)
             if nprocs>0
                 push!(shellcmd, "-n", "$nprocs")
             end
+            append!(shellcmd, Vector{AbstractString}(collect(mpiopts)))
         end
         append!(shellcmd, Base.julia_cmd().exec)
         if !usempi
@@ -241,6 +243,7 @@ function submit(job, mgr::ProcessManager; usempi::Bool=false, nprocs::Integer=0)
                 push!(shellcmd, "-p", "$nprocs")
             end
         end
+        append!(shellcmd, Vector{AbstractString}(collect(juliaopts)))
         juliacmd = "using Persist; Persist.runjob($(juliaquote(jobfile)), $(juliaquote(resultfile)))"
         push!(shellcmd, "-e", juliacmd)
         shellcmd = map(shellquote, shellcmd)
@@ -259,7 +262,7 @@ $(join(shellcmd, " "))
     open(joinpath(jobdir, errfile), "w") do f end
     open(joinpath(jobdir, pidfile), "w") do f end
     # Start the job in the job directory
-    spawn(detach(setenv(`sh $shellfile`, dir=jobdir)))
+    spawn(detach(setenv(`sh $(mgropts...) $shellfile`, dir=jobdir)))
     # Wait for the job to output its pid
     # TODO: We should get the pid from spwan, but I don't know how
     local buf
@@ -395,7 +398,8 @@ function deserialize(s::Base.SerializationState, ::Type{PBSManager})
 end
 
 "Submit a job"
-function submit(job, mgr::PBSManager; usempi::Bool=false, nprocs::Integer=0)
+function submit(job, mgr::PBSManager; usempi::Bool=false, nprocs::Integer=0,
+                mgropts=[], mpiopts=[], juliaopts=[])
     @assert nprocs >= 0
     @assert status(mgr) == job_empty
     # Create job directory
@@ -424,6 +428,7 @@ function submit(job, mgr::PBSManager; usempi::Bool=false, nprocs::Integer=0)
             if nprocs>0
                 push!(shellcmd, "-n", "$nprocs")
             end
+            append!(shellcmd, Vector{AbstractString}(collect(mpiopts)))
         end
         append!(shellcmd, Base.julia_cmd().exec)
         if !usempi
@@ -431,6 +436,7 @@ function submit(job, mgr::PBSManager; usempi::Bool=false, nprocs::Integer=0)
                 push!(shellcmd, "-p", "$nprocs")
             end
         end
+        append!(shellcmd, Vector{AbstractString}(collect(juliaopts)))
         juliacmd = "using Persist; Persist.runjob($(juliaquote(jobfile)), $(juliaquote(resultfile)))"
         push!(shellcmd, "-e", juliacmd)
         shellcmd = map(shellquote, shellcmd)
@@ -449,7 +455,7 @@ $(join(shellcmd, " "))
     open(joinpath(jobdir, errfile), "w") do f end
     # Start the job in the job directory
     # TODO: Teach Julia how to use the nodes that PBS reserved
-    buf = readstring(setenv(`qsub -D $jobdir -N $(mgr.jobname) -l nodes=$nprocs $shellfile`,
+    buf = readstring(setenv(`qsub -D $jobdir -N $(mgr.jobname) -l nodes=$nprocs $(mgropts...) $shellfile`,
                          dir=jobdir))
     m = match(r"([0-9]+)[.]", buf)
     mgr.jobid = m.captures[1]
@@ -579,7 +585,8 @@ function deserialize(s::Base.SerializationState, ::Type{SlurmManager})
 end
 
 "Submit a job"
-function submit(job, mgr::SlurmManager; usempi::Bool=false, nprocs::Integer=0)
+function submit(job, mgr::SlurmManager; usempi::Bool=false, nprocs::Integer=0,
+                mgropts=[], mpiopts=[], juliaopts=[])
     @assert nprocs >= 0
     @assert status(mgr) == job_empty
     # Create job directory
@@ -608,6 +615,7 @@ function submit(job, mgr::SlurmManager; usempi::Bool=false, nprocs::Integer=0)
             if nprocs>0
                 push!(shellcmd, "-n", "$nprocs")
             end
+            append!(shellcmd, Vector{AbstractString}(collect(mpiopts)))
         end
         append!(shellcmd, Base.julia_cmd().exec)
         if !usempi
@@ -615,6 +623,7 @@ function submit(job, mgr::SlurmManager; usempi::Bool=false, nprocs::Integer=0)
                 push!(shellcmd, "-p", "$nprocs")
             end
         end
+        append!(shellcmd, Vector{AbstractString}(collect(juliaopts)))
         juliacmd = "using Persist; Persist.runjob($(juliaquote(jobfile)), $(juliaquote(resultfile)))"
         push!(shellcmd, "-e", juliacmd)
         shellcmd = map(shellquote, shellcmd)
@@ -633,7 +642,7 @@ $(join(shellcmd, " "))
     open(joinpath(jobdir, errfile), "w") do f end
     # Start the job in the job directory
     # TODO: Teach Julia how to use the nodes that Slurm reserved
-    buf = readstring(setenv(`sbatch -D $jobdir -J $(mgr.jobname) -n $nprocs $shellfile`,
+    buf = readstring(setenv(`sbatch -D $jobdir -J $(mgr.jobname) -n $nprocs $(mgropts...) $shellfile`,
                          dir=jobdir))
     m = match(r"Submitted batch job ([0-9]+)", buf)
     mgr.jobid = m.captures[1]
@@ -738,9 +747,11 @@ end
 
 "Start a job"
 function persist{JM<:JobManager}(job, jobname::AbstractString, ::Type{JM};
-                                 usempi::Bool=false, nprocs::Integer=0)
+                                 usempi::Bool=false, nprocs::Integer=0,
+                                 mgropts=[], mpiopts=[], juliaopts=[])
     mgr = JM(jobname)
-    submit(job, mgr, usempi=usempi, nprocs=nprocs)
+    submit(job, mgr, usempi=usempi, nprocs=nprocs,
+           mgropts=mgropts, mpiopts=mpiopts, juliaopts=juliaopts)
     mgr::JM
 end
 
