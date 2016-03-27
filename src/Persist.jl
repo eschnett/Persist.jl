@@ -271,7 +271,7 @@ mv $(shellquote("$resultfile.tmp")) $(shellquote(resultfile))
     end
     buf = readstring(joinpath(jobdir, pidfile))
     mgr.pid = parse(Int, buf)
-    info("Process id: $(mgr.pid)")
+    info("Job \"$(mgr.jobname)\" has process id $(mgr.pid)")
     # Serialize the manager
     mgrfile = mgrfilename(mgr.jobname)
     open(joinpath(jobdir, mgrfile), "w") do f
@@ -463,7 +463,7 @@ mv $(shellquote("$resultfile.tmp")) $(shellquote(resultfile))
                          dir=jobdir))
     m = match(r"([0-9]+)[.]", buf)
     mgr.jobid = m.captures[1]
-    info("PBS job id: $(mgr.jobid)")
+    info("Job \"$(mgr.jobname)\" has PBS job id $(mgr.pid)")
     # Serialize the manager
     mgrfile = mgrfilename(mgr.jobname)
     open(joinpath(jobdir, mgrfile), "w") do f
@@ -655,7 +655,7 @@ mv $(shellquote("$resultfile.tmp")) $(shellquote(resultfile))
                          dir=jobdir))
     m = match(r"Submitted batch job ([0-9]+)", buf)
     mgr.jobid = m.captures[1]
-    info("Slurm job id: $(mgr.jobid)")
+    info("Job \"$(mgr.jobname)\" has Slurm job id $(mgr.pid)")
     # Serialize the manager
     mgrfile = mgrfilename(mgr.jobname)
     open(joinpath(jobdir, mgrfile), "w") do f
