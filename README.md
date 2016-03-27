@@ -29,7 +29,7 @@ Here is an example:
 using Persist
 
 # Start a calculation in the background
-job = @persist "hello" ProcessManager begin
+job = persist("hello", ProcessManager) begin
     sleep(10)   # Simulate a long-running task
     println("Hello, World!")   # Produce some output
     return [42]   # Return a value
@@ -53,7 +53,10 @@ You can also use Slurm to submit a job:
 ```Julia
 using Persist
 
-@persist "calcpi" SlurmManager (sleep(10); big(pi))
+persist("calcpi", SlurmManager) do
+    sleep(10)
+    big(pi)
+end
 
 # Jobs are written to file, and can be read back in
 job = readmgr("calcpi")
