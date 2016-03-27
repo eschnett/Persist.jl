@@ -1,5 +1,6 @@
 using Persist
 using Base.Test
+using Compat
 
 # Clean up possible left-over output from previous (failed) tests
 try rm("hello.job", recursive=true) end
@@ -39,7 +40,7 @@ wait(hello)
 cleanup(hello)
 
 # TODO: Use glob instead of shell
-@unix_only @test readall(`sh -c 'echo hello*'`) == "hello*\n"
+@unix_only @test readstring(`sh -c 'echo hello*'`) == "hello*\n"
 
 # Test SlurmManager only if Slurm is installed
 have_slurm = false

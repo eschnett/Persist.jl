@@ -1,5 +1,7 @@
 module Persist
 
+using Compat
+
 # TODO: use ClusterManagers
 # using ClusterManagers
 
@@ -262,7 +264,7 @@ $(join(shellcmd, " "))
     # TODO: We should get the pid from spwan, but I don't know how
     local buf
     while true
-        buf = readall(joinpath(jobdir, pidfile))
+        buf = readstring(joinpath(jobdir, pidfile))
         if endswith(buf, '\n') break end
         sleep(0.1)
     end
@@ -301,7 +303,7 @@ function jobinfo(mgr::ProcessManager)
     if st == job_queued return "[job_queued]" end
     if st == job_running
         try
-            return readall(`ps -f -p $(mgr.pid)`)
+            return readstring(`ps -f -p $(mgr.pid)`)
         end
         # `ps` failed; most likely because the process does not exist any more
     end
@@ -348,13 +350,13 @@ end
 "Get stdout from a job"
 function getstdout(mgr::ProcessManager)
     @assert status(mgr) != job_empty
-    readall(joinpath(jobdirname(mgr.jobname), outfilename(mgr.jobname)))
+    readstring(joinpath(jobdirname(mgr.jobname), outfilename(mgr.jobname)))
 end
 
 "Get stderr from a job"
 function getstderr(mgr::ProcessManager)
     @assert status(mgr) != job_empty
-    readall(joinpath(jobdirname(mgr.jobname), errfilename(mgr.jobname)))
+    readstring(joinpath(jobdirname(mgr.jobname), errfilename(mgr.jobname)))
 end
 
 "Clean up after a job (delete all traces of the job, including its result)"
@@ -447,7 +449,7 @@ $(join(shellcmd, " "))
     open(joinpath(jobdir, errfile), "w") do f end
     # Start the job in the job directory
     # TODO: Teach Julia how to use the nodes that PBS reserved
-    buf = readall(setenv(`qsub -D $jobdir -N $(mgr.jobname) -l nodes=$nprocs $shellfile`,
+    buf = readstring(setenv(`qsub -D $jobdir -N $(mgr.jobname) -l nodes=$nprocs $shellfile`,
                          dir=jobdir))
     m = match(r"([0-9]+)[.]", buf)
     mgr.jobid = m.captures[1]
@@ -464,7 +466,7 @@ end
 function status(mgr::PBSManager)
     if isempty(mgr.jobid) return job_empty end
     try
-        buf = readall(`qstat -x $(mgr.jobid)`)
+        buf = readstring(`qstat -x $(mgr.jobid)`)
         state = chomp(buf)
         if contains(state, "<job_state>Q</job_state>")
             return job_queued
@@ -488,7 +490,7 @@ function jobinfo(mgr::PBSManager)
     st = status(mgr)
     @assert st != job_empty
     try
-        return readall(`qstat $(mgr.jobid)`)
+        return readstring(`qstat $(mgr.jobid)`)
     end
     # PBS knows nothing about this job
     "[job_done]"
@@ -531,14 +533,14 @@ end
 function getstdout(mgr::PBSManager)
     @assert status(mgr) != job_empty
     # TODO: Read stdout while job is running
-    readall(joinpath(jobdirname(mgr.jobname), outfilename(mgr.jobname)))
+    readstring(joinpath(jobdirname(mgr.jobname), outfilename(mgr.jobname)))
 end
 
 "Get stderr from a job"
 function getstderr(mgr::PBSManager)
     @assert status(mgr) != job_empty
     # TODO: Read stdout while job is running
-    readall(joinpath(jobdirname(mgr.jobname), errfilename(mgr.jobname)))
+    readstring(joinpath(jobdirname(mgr.jobname), errfilename(mgr.jobname)))
 end
 
 "Clean up after a job (delete all traces of the job, including its result)"
@@ -631,7 +633,7 @@ $(join(shellcmd, " "))
     open(joinpath(jobdir, errfile), "w") do f end
     # Start the job in the job directory
     # TODO: Teach Julia how to use the nodes that Slurm reserved
-    buf = readall(setenv(`sbatch -D $jobdir -J $(mgr.jobname) -n $nprocs $shellfile`,
+    buf = readstring(setenv(`sbatch -D $jobdir -J $(mgr.jobname) -n $nprocs $shellfile`,
                          dir=jobdir))
     m = match(r"Submitted batch job ([0-9]+)", buf)
     mgr.jobid = m.captures[1]
@@ -648,7 +650,7 @@ end
 function status(mgr::SlurmManager)
     if isempty(mgr.jobid) return job_empty end
     try
-        buf = readall(`squeue -h -j $(mgr.jobid) -o '%t'`)
+        buf = readstring(`squeue -h -j $(mgr.jobid) -o '%t'`)
         state = chomp(buf)
         if state in ["CF", "PD"]
             return job_queued
@@ -671,7 +673,7 @@ function jobinfo(mgr::SlurmManager)
     st = status(mgr)
     @assert st != job_empty
     try
-        return readall(`squeue -j $(mgr.jobid)`)
+        return readstring(`squeue -j $(mgr.jobid)`)
     end
     # Slurm knows nothing about this job
     "[job_done]"
@@ -714,14 +716,14 @@ end
 function getstdout(mgr::SlurmManager)
     @assert status(mgr) != job_empty
     # TODO: Read stdout while job is running
-    readall(joinpath(jobdirname(mgr.jobname), outfilename(mgr.jobname)))
+    readstring(joinpath(jobdirname(mgr.jobname), outfilename(mgr.jobname)))
 end
 
 "Get stderr from a job"
 function getstderr(mgr::SlurmManager)
     @assert status(mgr) != job_empty
     # TODO: Read stdout while job is running
-    readall(joinpath(jobdirname(mgr.jobname), errfilename(mgr.jobname)))
+    readstring(joinpath(jobdirname(mgr.jobname), errfilename(mgr.jobname)))
 end
 
 "Clean up after a job (delete all traces of the job, including its result)"
