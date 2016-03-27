@@ -288,6 +288,9 @@ function status(mgr::ProcessManager)
     # end
     resultfile = joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
     isfile(resultfile) && return job_done
+    if !success(pipeline(`ps -p $(mgr.pid)`, stdout=DevNull, stderr=DevNull))
+        return job_failed
+    end
     job_running
 end
 
@@ -332,7 +335,7 @@ end
 
 "Fetch job result"
 function fetch(mgr::ProcessManager)
-    @assert status(mgr) != job_empty
+    @assert !(status(mgr) in (job_empty, job_failed))
     wait(mgr)
     resultfile = joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
     local result
