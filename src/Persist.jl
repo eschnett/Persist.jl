@@ -150,8 +150,7 @@ abstract JobManager
 "`runjob` is called from the shell script to execute the job"
 function runjob(jobfile::AbstractString, resultfile::AbstractString)
     # Delete any existing job results
-    tmpfile = "$resultfile.tmp"
-    try rm(tmpfile) end
+    try rm(resultfile) end
     # Deserialize the job
     local job
     open(jobfile, "r") do f
@@ -160,7 +159,7 @@ function runjob(jobfile::AbstractString, resultfile::AbstractString)
     # Run the job
     result = job()
     # Serialize the result
-    open(tmpfile, "w") do f
+    open(resultfile, "w") do f
         serialize(f, result)
     end
 end
@@ -247,7 +246,7 @@ function submit(job, mgr::ProcessManager; usempi::Bool=false, nprocs::Integer=0,
             end
         end
         append!(shellcmd, Vector{AbstractString}(collect(juliaopts)))
-        juliacmd = "using Persist; Persist.runjob($(juliaquote(jobfile)), $(juliaquote(resultfile)))"
+        juliacmd = "using Persist; Persist.runjob($(juliaquote(jobfile)), $(juliaquote("$resultfile.tmp")))"
         push!(shellcmd, "-e", juliacmd)
         shellcmd = map(shellquote, shellcmd)
         push!(shellcmd, "</dev/null")
@@ -325,7 +324,7 @@ end
 
 "Check whether a job is done"
 function isready(mgr::ProcessManager)
-    return status(mgr) == job_done
+    status(mgr) == job_done
 end
 
 "Wait until a job is done"
@@ -443,24 +442,32 @@ function submit(job, mgr::PBSManager; usempi::Bool=false, nprocs::Integer=0,
             end
         end
         append!(shellcmd, Vector{AbstractString}(collect(juliaopts)))
-        juliacmd = "using Persist; Persist.runjob($(juliaquote(jobfile)), $(juliaquote(resultfile)))"
+        juliacmd = "using Persist; Persist.runjob($(juliaquote(jobfile)), $(juliaquote("$resultfile.tmp")))"
         push!(shellcmd, "-e", juliacmd)
         shellcmd = map(shellquote, shellcmd)
         push!(shellcmd, "</dev/null")
         push!(shellcmd, ">$(shellquote(outfile))")
         push!(shellcmd, "2>$(shellquote(errfile))")
+        nodespec = "nodes=$nprocs"
+        if ismatch(r"^shelob\d+", gethostname())
+            # TODO: Avoid special cases like this
+            nodespec = "$nodespec:ppn=16"
+        end
+        # TODO: Teach Julia how to use the nodes that PBS reserved
         print(f, """
 #! /bin/sh
 # This is an auto-generated Julia script for the Persist package
+#PBS -d $jobdir
+#PBS -l $nodespec
+#PBS -N $(mgr.jobname)
+#PBS $(mgropts...)
 hostname
 $(join(shellcmd, " "))
 mv $(shellquote("$resultfile.tmp")) $(shellquote(resultfile))
 """)
     end
     # Start the job in the job directory
-    # TODO: Teach Julia how to use the nodes that PBS reserved
-    buf = readstring(setenv(`qsub -D $jobdir -N $(mgr.jobname) -l nodes=$nprocs $(mgropts...) $shellfile`,
-                         dir=jobdir))
+    buf = readstring(setenv(`qsub $shellfile`, dir=jobdir))
     m = match(r"([0-9]+)[.]", buf)
     mgr.jobid = m.captures[1]
     info("Job \"$(mgr.jobname)\" has PBS job id $(mgr.jobid)")
@@ -474,24 +481,26 @@ end
 
 "Get job status code"
 function status(mgr::PBSManager)
-    if isempty(mgr.jobid) return job_empty end
+    isempty(mgr.jobid) && return job_empty
+    resultfile = joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
+    isfile(resultfile) && return job_done
     try
         buf = readstring(`qstat -x $(mgr.jobid)`)
-        state = chomp(buf)
-        if contains(state, "<job_state>Q</job_state>")
+        m = match(r"<job_state>([^<]*)</job_state>", buf)
+        state = m.captures[1]
+        if state == "Q"
             return job_queued
-        elseif (contains(state, "<job_state>H</job_state>") ||
-                contains(state, "<job_state>R</job_state>"))
+        elseif state == "H" || state == "R"
             return job_running
-        elseif contains(state, "<job_state>C</job_state>")
+        elseif state == "C"
             return job_done
+        elseif state == "E"
+            return job_failed
         else
             @assert false
         end
     end
     # PBS knows nothing about this job
-    resultfile = joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
-    isfile(resultfile) && job_done
     job_failed
 end
 
@@ -516,7 +525,7 @@ end
 
 "Check whether a job is done"
 function isready(mgr::PBSManager)
-    return status(mgr) == job_done
+    status(mgr) == job_done
 end
 
 "Wait until a job is done"
@@ -635,15 +644,20 @@ function submit(job, mgr::SlurmManager; usempi::Bool=false, nprocs::Integer=0,
             end
         end
         append!(shellcmd, Vector{AbstractString}(collect(juliaopts)))
-        juliacmd = "using Persist; Persist.runjob($(juliaquote(jobfile)), $(juliaquote(resultfile)))"
+        juliacmd = "using Persist; Persist.runjob($(juliaquote(jobfile)), $(juliaquote("$resultfile.tmp")))"
         push!(shellcmd, "-e", juliacmd)
         shellcmd = map(shellquote, shellcmd)
         push!(shellcmd, "</dev/null")
         push!(shellcmd, ">$(shellquote(outfile))")
         push!(shellcmd, "2>$(shellquote(errfile))")
+        # TODO: Teach Julia how to use the nodes that Slurm reserved
         print(f, """
 #! /bin/sh
 # This is an auto-generated Julia script for the Persist package
+#SBATCH -D $jobdir
+#SBATCH -J $(mgr.jobname)
+#SBATCH -n $nprocs
+#SBATCH $(mgropts...)
 hostname
 $(join(shellcmd, " "))
 mv $(shellquote("$resultfile.tmp")) $(shellquote(resultfile))
@@ -651,8 +665,7 @@ mv $(shellquote("$resultfile.tmp")) $(shellquote(resultfile))
     end
     # Start the job in the job directory
     # TODO: Teach Julia how to use the nodes that Slurm reserved
-    buf = readstring(setenv(`sbatch -D $jobdir -J $(mgr.jobname) -n $nprocs $(mgropts...) $shellfile`,
-                         dir=jobdir))
+    buf = readstring(setenv(`sbatch $shellfile`, dir=jobdir))
     m = match(r"Submitted batch job ([0-9]+)", buf)
     mgr.jobid = m.captures[1]
     info("Job \"$(mgr.jobname)\" has Slurm job id $(mgr.jobid)")
@@ -666,7 +679,7 @@ end
 
 "Get job status code"
 function status(mgr::SlurmManager)
-    if isempty(mgr.jobid) return job_empty end
+    isempty(mgr.jobid) && return job_empty
     try
         buf = readstring(`squeue -h -j $(mgr.jobid) -o '%t'`)
         state = chomp(buf)
@@ -682,7 +695,7 @@ function status(mgr::SlurmManager)
     end
     # Slurm knows nothing about this job
     resultfile = joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
-    isfile(resultfile) && job_done
+    isfile(resultfile) && return job_done
     job_failed
 end
 
@@ -707,7 +720,7 @@ end
 
 "Check whether a job is done"
 function isready(mgr::SlurmManager)
-    return status(mgr) == job_done
+    status(mgr) == job_done
 end
 
 "Wait until a job is done"
