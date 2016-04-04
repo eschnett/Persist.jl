@@ -798,4 +798,17 @@ function readmgr(jobname::AbstractString)
     mgr::JobManager
 end
 
+"Fetch job result"
+function fetch(jobname::AbstractString)
+    resultfile = joinpath(jobdirname(jobname), resultfilename(jobname))
+    if !isfile(resultfile)
+        warn("$resultfile doesn't exist. Maybe the job doesn't finish.")
+    end
+    local result
+    open(resultfile, "r") do f
+        result = deserialize(f)
+    end
+    result
+end
+
 end # module
