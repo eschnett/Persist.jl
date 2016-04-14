@@ -483,7 +483,7 @@ function status(mgr::PBSManager)
     resultfile = joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
     isfile(resultfile) && return job_done
     try
-        buf = readstring(`qstat -x $(mgr.jobid)`)
+        buf = readstring(pipeline(`qstat -x $(mgr.jobid)`, stderr=DevNull))
         m = match(r"<job_state>([^<]*)</job_state>", buf)
         state = m.captures[1]
         if state == "Q"
@@ -507,7 +507,8 @@ function jobinfo(mgr::PBSManager)
     st = status(mgr)
     @assert st != job_empty
     try
-        return readstring(`qstat $(mgr.jobid)`)
+        return readstring(pipeline(`qstat $(mgr.jobid)`,
+                                   stdout=DevNull, stderr=DevNull))
     end
     # PBS knows nothing about this job
     "[job_done]"
