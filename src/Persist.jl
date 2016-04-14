@@ -310,7 +310,7 @@ function jobinfo(mgr::ProcessManager)
     "[job_done]"
 end
 
-"Cancel a job"
+"Cancel (kill, delete) a job"
 function cancel(mgr::ProcessManager; force::Bool=false)
     @assert status(mgr) != job_empty
     signum = force ? "SIGKILL" : "SIGTERM"
@@ -513,7 +513,7 @@ function jobinfo(mgr::PBSManager)
     "[job_done]"
 end
 
-"Cancel a job"
+"Cancel (kill, delete) a job"
 function cancel(mgr::PBSManager; force::Bool=false)
     @assert status(mgr) != job_empty
     # TODO: Handle things differently for force=false and force=true
@@ -707,7 +707,7 @@ function jobinfo(mgr::SlurmManager)
     "[job_done]"
 end
 
-"Cancel a job"
+"Cancel (kill, delete) a job"
 function cancel(mgr::SlurmManager; force::Bool=false)
     @assert status(mgr) != job_empty
     # TODO: Handle things differently for force=false and force=true
