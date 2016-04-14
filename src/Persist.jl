@@ -152,9 +152,8 @@ function runjob(jobfile::AbstractString, resultfile::AbstractString)
     # Delete any existing job results
     try rm(resultfile) end
     # Deserialize the job
-    local job
-    open(jobfile, "r") do f
-        job = deserialize(f)
+    job = open(jobfile, "r") do f
+        deserialize(f)
     end
     # Run the job
     result = job()
@@ -341,9 +340,8 @@ function fetch(mgr::ProcessManager)
     @assert !(status(mgr) in (job_empty, job_failed))
     wait(mgr)
     resultfile = joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
-    local result
-    open(resultfile, "r") do f
-        result = deserialize(f)
+    result = open(resultfile, "r") do f
+        deserialize(f)
     end
     result
 end
@@ -541,9 +539,8 @@ end
 function fetch(mgr::PBSManager)
     wait(mgr)
     resultfile = joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
-    local result
-    open(resultfile, "r") do f
-        result = deserialize(f)
+    result = open(resultfile, "r") do f
+        deserialize(f)
     end
     result
 end
@@ -736,9 +733,8 @@ end
 function fetch(mgr::SlurmManager)
     wait(mgr)
     resultfile = joinpath(jobdirname(mgr.jobname), resultfilename(mgr.jobname))
-    local result
-    open(resultfile, "r") do f
-        result = deserialize(f)
+    result = open(resultfile, "r") do f
+        deserialize(f)
     end
     result
 end
@@ -791,9 +787,8 @@ end
 "Read job manager from file"
 function readmgr(jobname::AbstractString)
     mgrfile = joinpath(jobdirname(jobname), mgrfilename(jobname))
-    local mgr
-    open(mgrfile, "r") do f
-        mgr = deserialize(f)
+    mgr = open(mgrfile, "r") do f
+        deserialize(f)
     end
     mgr::JobManager
 end
